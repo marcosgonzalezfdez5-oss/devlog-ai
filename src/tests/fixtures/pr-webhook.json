@@ -1,0 +1,20 @@
+{
+  "action": "closed",
+  "pull_request": {
+    "number": 42,
+    "title": "Add user authentication",
+    "body": "Implements JWT-based auth for all API routes.",
+    "merged": true,
+    "merged_at": "2026-06-12T10:00:00Z",
+    "labels": [],
+    "user": { "login": "testuser" },
+    "head": { "ref": "feature/auth", "sha": "abc123" },
+    "base": { "ref": "main", "repo": { "full_name": "testorg/testrepo" } }
+  },
+  "repository": {
+    "id": 1,
+    "full_name": "testorg/testrepo",
+    "private": false
+  },
+  "installation": { "id": 99 }
+}

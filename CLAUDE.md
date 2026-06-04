@@ -2,16 +2,25 @@
 
 Automatically keeps project documentation up to date by monitoring GitHub pull requests and generating documentation updates as reviewable pull requests. "DevLogAI keeps your docs honest."
 
-Built for the **Gemini for XPRIZE Hackathon** (deadline: August 17, 2026). Must use at least one Google Cloud product → Gemini API is the AI engine.
+Built for the **Band of Agents Hackathon** (lablab.ai, June 12–19, 2026). Multi-agent requirement: minimum 3 agents coordinating through Band SDK.
+Also targeting **Gemini for XPRIZE Hackathon** (deadline: August 17, 2026) — Gemini API satisfies the Google Cloud requirement.
 
 ---
 
 ## Architecture
 
-Hybrid: a webhook receiver responds to GitHub immediately (enqueues a job), and a separate long-running worker processes jobs asynchronously. Both services are deployed on Railway from the same repo with different start commands.
-
 ```
-GitHub webhook → Hono receiver → BullMQ queue → Worker → Gemini 2.5 Flash → GitHub PR
+GitHub webhook → Hono receiver → BullMQ queue → Worker
+                                                    ↓
+                                         [Band SDK orchestration]
+                                                    ↓
+                                        CoordinatorAgent (fetches PR data)
+                                                    ↓
+                                        AnalyzerAgent (Gemini: what changed?)
+                                                    ↓
+                                         WriterAgent (Gemini: write the docs)
+                                                    ↓
+                                          GitHub Doc PR created
 ```
 
 Three Railway services: `web` (Hono), `worker` (BullMQ), plus managed `Postgres` and `Redis` addons.
@@ -27,9 +36,9 @@ Frontend (Next.js) is deployed separately on Vercel.
 | Frontend | Next.js (App Router) + Tailwind CSS + shadcn/ui |
 | Database | PostgreSQL + Drizzle ORM |
 | Queue | BullMQ + Redis |
+| Agent coordination | Band SDK (`BAND_MODE=mock` before kick-off, `BAND_MODE=live` after) |
 | AI | Gemini 2.5 Flash (`@google/generative-ai`) |
 | GitHub | GitHub App + Octokit (`@octokit/app`, `@octokit/rest`) |
-| Payments | Stripe Checkout |
 | Hosting (backend) | Railway |
 | Hosting (frontend) | Vercel |
 | Testing | Vitest |
@@ -40,15 +49,57 @@ Frontend (Next.js) is deployed separately on Vercel.
 
 ```
 src/
-  webhook/     # Hono routes + GitHub webhook verification + event routing
-  worker/      # BullMQ worker + job processors
-  github/      # Octokit client, PR creation, repo cloning
-  ai/          # Gemini prompt builder + structured output parsing
-  db/          # Drizzle schema + query functions
-  config/      # devlogai.yml parser + defaults
+  webhook/
+    index.ts                  # Hono app entry
+    routes/github.ts          # POST /webhooks/github
+    routes/health.ts
+    middleware/verify-github.ts  # HMAC-SHA256 signature check
+  worker/
+    index.ts                  # BullMQ worker entry
+    processor.ts              # calls band.runPipeline, updates DB
+  agents/
+    band.ts                   # Band SDK abstraction (mock + live, BAND_MODE env switch)
+    coordinator.ts            # fetches PR data, orchestrates pipeline, creates Doc PR
+    analyzer.ts               # Gemini: analyze diff → AnalysisResult
+    writer.ts                 # Gemini: write docs → DocContent
+  github/
+    client.ts                 # Octokit per-installation auth
+    pr.ts                     # fetchPRMetadata, fetchPRDiff, createDocPR
+    files.ts                  # readFile, createOrUpdateFile
+  ai/
+    client.ts                 # Gemini client factory
+    analyzer-prompt.ts        # prompt builder + diff trimming logic
+    writer-prompt.ts          # prompt builder from AnalysisResult
+    schemas.ts                # Zod schemas for structured Gemini output
+  db/
+    schema.ts                 # Drizzle: installations, repositories, jobs
+    client.ts
+    migrations/
+    queries/
+      jobs.ts
+      repos.ts
+      installations.ts
+  queue/
+    client.ts                 # BullMQ Queue instance
+    types.ts                  # JobPayload type
+  config/
+    parser.ts                 # devlogai.yml parser (js-yaml)
+    defaults.ts               # fallback config when .yml missing
+  types/
+    agents.ts                 # AnalysisResult, DocContent, AgentRun
+    github.ts                 # webhook payload types
+
 frontend/
-  app/         # Next.js App Router pages (landing, dashboard)
-  components/  # shadcn/ui components
+  app/
+    page.tsx                  # minimal landing page
+    dashboard/page.tsx        # job list (last 50, auto-refresh 10s)
+    dashboard/jobs/[id]/page.tsx  # agent timeline + Doc PR link
+  components/
+    job-list.tsx
+    agent-timeline.tsx        # 3-step stepper: Coordinator → Analyzer → Writer
+    status-badge.tsx
+  lib/
+    api.ts                    # fetch wrapper to backend
 ```
 
 ---
@@ -83,30 +134,67 @@ Three tables — no users table (identity comes from GitHub App installation):
 
 - **installations** — `id`, `github_install_id`, `account_login`, `account_type`, `created_at`
 - **repositories** — `id`, `installation_id` (FK), `full_name`, `config` (JSONB), `active`, `created_at`
-- **jobs** — `id`, `repository_id` (FK), `source_pr_number`, `status`, `gemini_response` (JSONB), `doc_pr_number`, `error`, `created_at`, `completed_at`
+- **jobs** — `id`, `repository_id` (FK), `source_pr_number`, `status`, `agent_runs` (JSONB), `doc_pr_number`, `error`, `created_at`, `completed_at`
 
-The `jobs` table is the audit log and the source for product metrics (acceptance rate, time saved).
+`agent_runs` shape:
+```ts
+Array<{
+  agent_name: "coordinator" | "analyzer" | "writer";
+  started_at: string;       // ISO timestamp
+  completed_at: string;
+  input_summary: string;    // one-line description of input
+  output_summary: string;   // one-line description of output
+  status: "completed" | "failed";
+  error?: string;
+}>
+```
+
+The `jobs` table is the audit log and the source for dashboard metrics.
 
 ---
 
-## AI Analysis Engine
+## Agent Architecture
 
-One Gemini 2.5 Flash call per job. Use structured output (response schema) to enforce a typed JSON response:
+### Band SDK Abstraction (`src/agents/band.ts`)
 
+Exports `createBandOrchestrator(config)` → `{ runPipeline(job): Promise<PipelineResult> }`.
+
+- **`BAND_MODE=mock`** — runs the 3 agent functions sequentially in-process, passing typed objects. Used Days 1–4 before Band credentials arrive at the June 12 kick-off.
+- **`BAND_MODE=live`** — wraps each function as a Band SDK agent. Band handles message-passing, retries, context propagation.
+
+Both modes produce identical `agent_runs` log entries so the dashboard renders correctly in either mode.
+
+### CoordinatorAgent (`src/agents/coordinator.ts`)
+
+- Authenticate Octokit for the installation
+- Fetch PR metadata (title, body, labels, commit messages)
+- Fetch PR diff, apply diff trimming: prioritize `routes/`, `api/`, `*.config.*`, public interfaces; drop `*.lock`, `tests/`, `*.snap`
+- Pass `{ prMetadata, diff }` → AnalyzerAgent
+- Receive `AnalysisResult` → pass with `prMetadata` → WriterAgent
+- Receive `DocContent` → read current `CHANGELOG.md` + `RELEASE_NOTES.md`, prepend entries, create branch `devlogai/docs-pr-<prNumber>`, commit, open Doc PR
+
+### AnalyzerAgent (`src/agents/analyzer.ts`)
+
+Calls Gemini 2.5 Flash with structured output. Returns:
 ```ts
 {
-  changelog_entry: string;
-  release_notes: string;
-  readme_updates: Array<{ section_tag: string; content: string }>;
+  affected_apis: string[];
+  config_changes: string[];
+  public_interface_changes: string[];
   confidence_score: number; // 0–1
-  affected_files: string[];
   reasoning: string;
 }
 ```
 
-Never chain multiple LLM calls in a single job — one call, one structured response.
+### WriterAgent (`src/agents/writer.ts`)
 
-For large PRs, apply diff trimming: prioritize changed public interfaces, API routes, config files, and CLI entry points over internal implementation files.
+Calls Gemini 2.5 Flash with structured output. Returns:
+```ts
+{
+  changelog_entry: string;
+  release_notes: string;
+}
+```
 
 ---
 
@@ -141,7 +229,7 @@ ignore_paths:
   - "*.lock"
 ```
 
-MVP supports `batching: per-pr` only. Daily digest and release candidate modes are post-MVP.
+MVP supports `batching: per-pr` only.
 
 ---
 
@@ -153,18 +241,6 @@ Skip job creation when:
 - PR title matches a conventional commit prefix in the ignore list
 
 This avoids unnecessary Gemini calls.
-
----
-
-## README Maintenance Constraint
-
-README updates are limited to DocPilot-tagged sections only. Never modify untagged content.
-
-```markdown
-<!-- devlogai-env-vars-start -->
-...
-<!-- devlogai-env-vars-end -->
-```
 
 ---
 
@@ -182,10 +258,18 @@ Each Doc PR targets a unique branch (`devlogai/docs-pr-<source-pr-number>`).
 
 ---
 
-## Payments
+## Dashboard
 
-Stripe Checkout with a single paid tier ($19/mo, unlimited repos). Free tier: first repo only.
-GitHub App install flow → post-install redirect → Stripe paywall after free repo limit.
+**`/dashboard`** — job table: `Created | Repository | Source PR | Status | Doc PR link`. Auto-refresh every 10s (polling, no websockets).
+
+**`/dashboard/jobs/[id]`** — agent timeline:
+```
+[1] Coordinator Agent  ✓ completed  1.2s   Fetched PR #42, 847 lines across 12 files
+[2] Analyzer Agent     ✓ completed  8.4s   Confidence: 0.87 · 3 public APIs changed
+[3] Writer Agent       ✓ completed  6.1s   changelog entry + release notes generated
+
+Doc PR: #103 — docs: update documentation for merged PR #42  [View on GitHub ↗]
+```
 
 ---
 
@@ -194,8 +278,8 @@ GitHub App install flow → post-install redirect → Stripe paywall after free 
 Vitest only. Three integration tests covering the critical path:
 
 1. Webhook ingestion → job enqueued
-2. Job processor → correct Gemini prompt built from PR data
-3. GitHub PR creation → correct files modified
+2. `runAnalyzerAgent` → returns `AnalysisResult` matching Zod schema (mock Gemini)
+3. `createDocPR` → correct branch name + PR title format (mock Octokit)
 
 No unit tests for helpers. No coverage thresholds. Use recorded fixtures for GitHub/Gemini responses so tests run offline.
 
@@ -218,10 +302,9 @@ DATABASE_URL=
 # Redis
 REDIS_URL=
 
-# Stripe
-STRIPE_SECRET_KEY=
-STRIPE_WEBHOOK_SECRET=
-STRIPE_PRICE_ID=
+# Band SDK
+BAND_API_KEY=
+BAND_MODE=mock   # or "live"
 
 # App
 APP_URL=
@@ -234,16 +317,16 @@ APP_URL=
 In scope:
 - Changelog generation
 - Release notes generation
-- README maintenance (tagged sections only)
 - Documentation PRs (per-PR mode)
-- Shadow Mode comment on source PR
-- Landing page + pricing
-- Post-install dashboard (repos, job history, Doc PR status)
-- Stripe billing
+- 3-agent Band SDK pipeline (Coordinator → Analyzer → Writer)
+- Landing page
+- Post-install dashboard (repos, job history, agent timeline)
 
 Post-MVP:
+- README maintenance (tagged sections only)
+- Shadow Mode comment on source PR
 - Batching modes (daily digest, release candidate)
-- Shadow Mode approval flow
+- Stripe billing
 - Broken link detection
 - Style voice matching
 - API documentation generation
