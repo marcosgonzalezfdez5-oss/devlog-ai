@@ -1,0 +1,15 @@
+langchain
+langgraph
+deepagents
+langchain-anthropic
+langchain-openai
+langchain-google-genai
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-dotenv
+gitpython
+pytest
+pytest-asyncio
+httpx
