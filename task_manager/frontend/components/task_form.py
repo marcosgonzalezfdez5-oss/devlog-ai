@@ -14,14 +14,17 @@ def _user_label(users: list[dict], user_id: str) -> str:
 
 
 @st.dialog("Create Task")
-def create_task_dialog(users: list[dict]) -> None:
+def create_task_dialog(users: list[dict]) -> None:    
+    current_user_id = st.session_state.get("user_id")
+    print(f"Current user ID: {current_user_id}")
+
     with st.form("create_task_form"):
         title = st.text_input("Title")
         description = st.text_area("Description")
         priority = st.selectbox("Priority", _PRIORITY_OPTIONS)
         assigned_to = st.selectbox(
             "Assigned To",
-            options=[u["id"] for u in users],
+            options=[current_user_id],
             format_func=lambda uid: _user_label(users, uid),
         )
         submitted = st.form_submit_button("Create")

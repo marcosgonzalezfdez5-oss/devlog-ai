@@ -18,7 +18,7 @@
 | `title` | `text` |  |
 | `description` | `text` |  Nullable |
 | `priority` | `task_priority` |  |
-| `progress` | `int2` |  |
+| `status` | `varchar(20)` |  |
 | `assigned_to` | `uuid` |  Nullable |
 | `created_at` | `timestamptz` |  |
 | `updated_at` | `timestamptz` |  |

@@ -7,7 +7,7 @@ import jwt
 from app.config import Settings
 from app.utils.exceptions import UnauthorizedError
 
-_ALGORITHMS = ["ES256", "RS256"]
+_ALGORITHMS = ["ES256"]
 _AUDIENCE = "authenticated"
 
 
@@ -20,10 +20,10 @@ def _get_jwk_client(supabase_url: str) -> jwt.PyJWKClient:
 def decode_access_token(token: str, settings: Settings) -> dict:
     """Decode and verify a Supabase access token against the project's JWKS.
 
-    Supabase signs tokens with an asymmetric key (ES256/RS256); the matching
-    public key is fetched from the project's JWKS endpoint by `kid`.
-    Validates signature, expiry, and audience. Raises UnauthorizedError on
-    any failure.
+    Supabase signs tokens with its ECC P-256 (ES256) signing key; the
+    matching public key is fetched from the project's JWKS endpoint by
+    `kid`. Validates signature, expiry, and audience. Raises
+    UnauthorizedError on any failure.
     """
     try:
         jwk_client = _get_jwk_client(settings.supabase_url)
