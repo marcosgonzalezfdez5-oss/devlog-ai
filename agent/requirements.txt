@@ -12,4 +12,6 @@ python-dotenv
 gitpython
 pytest
 pytest-asyncio
+pytest-playwright
+locust
 httpx
