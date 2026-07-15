@@ -1,0 +1,73 @@
+from pathlib import Path
+
+from app.models.enums import TestCategory
+from app.services.test_runner_service import _parse_locust_stats, run_pytest_suite
+
+
+def test_returns_not_executed_when_no_test_files(tmp_path: Path):
+    empty_dir = tmp_path / "unit"
+    empty_dir.mkdir()
+
+    result = run_pytest_suite(TestCategory.UNIT, empty_dir, tmp_path)
+
+    assert result.executed is False
+    assert result.passed == 0
+    assert result.failed == 0
+
+
+def test_parses_passed_failed_and_skipped_cases(tmp_path: Path):
+    test_dir = tmp_path / "unit"
+    test_dir.mkdir()
+    (test_dir / "test_sample.py").write_text(
+        "import pytest\n"
+        "def test_pass(): assert 1 + 1 == 2\n"
+        "def test_fail(): assert 1 + 1 == 3\n"
+        "def test_skip(): pytest.skip('skip on purpose')\n",
+        encoding="utf-8",
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    result = run_pytest_suite(TestCategory.UNIT, test_dir, run_dir)
+
+    assert result.executed is True
+    assert result.passed == 1
+    assert result.failed == 1
+    assert result.skipped == 1
+    outcomes = {c.name: c.outcome for c in result.cases}
+    assert outcomes["test_pass"] == "passed"
+    assert outcomes["test_fail"] == "failed"
+    assert outcomes["test_skip"] == "skipped"
+    failed_case = next(c for c in result.cases if c.name == "test_fail")
+    assert failed_case.failure_message is not None
+
+
+def test_parse_locust_stats_handles_normal_row(tmp_path: Path):
+    csv_path = tmp_path / "stats.csv"
+    csv_path.write_text(
+        "Type,Name,Request Count,Failure Count,Requests/s,95%\n"
+        ",Aggregated,100,5,10.5,250\n",
+        encoding="utf-8",
+    )
+
+    result = _parse_locust_stats(csv_path)
+
+    assert result.executed is True
+    assert result.requests_per_second == 10.5
+    assert result.failure_rate == 0.05
+    assert result.p95_latency_ms == 250.0
+
+
+def test_parse_locust_stats_handles_na_percentiles(tmp_path: Path):
+    csv_path = tmp_path / "stats.csv"
+    csv_path.write_text(
+        "Type,Name,Request Count,Failure Count,Requests/s,95%\n"
+        ",Aggregated,0,0,0.0,N/A\n",
+        encoding="utf-8",
+    )
+
+    result = _parse_locust_stats(csv_path)
+
+    assert result.executed is True
+    assert result.p95_latency_ms == 0.0
+    assert result.failure_rate == 0.0
