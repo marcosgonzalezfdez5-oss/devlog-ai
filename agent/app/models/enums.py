@@ -31,3 +31,11 @@ class DeploymentDecisionStatus(StrEnum):
 
     READY = "ready"
     BLOCKED = "blocked"
+
+
+class CoverageStatus(StrEnum):
+    """Per-category test coverage status reported by the Coverage Analysis Tool."""
+
+    PRESENT = "present"
+    MISSING = "missing"
+    NOT_REQUIRED = "not_required"
