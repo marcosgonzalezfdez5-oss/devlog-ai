@@ -17,7 +17,7 @@ def test_missing_when_no_test_dirs_exist(sut_repo: Path):
 
 
 def test_present_when_a_matching_unit_test_exists(sut_repo: Path):
-    unit_dir = sut_repo / "backend" / "tests" / "unit"
+    unit_dir = sut_repo / "tasks" / "unit"
     unit_dir.mkdir(parents=True)
     (unit_dir / "test_tasks.py").write_text("def test_tasks(): assert True\n", encoding="utf-8")
 
@@ -29,7 +29,7 @@ def test_present_when_a_matching_unit_test_exists(sut_repo: Path):
 
 
 def test_missing_when_test_dir_exists_but_nothing_matches(sut_repo: Path):
-    unit_dir = sut_repo / "backend" / "tests" / "unit"
+    unit_dir = sut_repo / "tasks" / "unit"
     unit_dir.mkdir(parents=True)
     (unit_dir / "test_unrelated.py").write_text("def test_unrelated(): assert True\n", encoding="utf-8")
 
@@ -37,6 +37,20 @@ def test_missing_when_test_dir_exists_but_nothing_matches(sut_repo: Path):
     coverage = analyze_coverage(sut_repo, changed)
 
     assert coverage.unit == CoverageStatus.MISSING
+
+
+def test_present_when_monolithic_category_file_exists_regardless_of_keywords(sut_repo: Path):
+    """task_manager's real convention: one `unit.py` covering every feature,
+    not named after any specific changed file."""
+    unit_dir = sut_repo / "tasks" / "unit"
+    unit_dir.mkdir(parents=True)
+    (unit_dir / "unit.py").write_text("def test_something(): assert True\n", encoding="utf-8")
+
+    changed = analyze_changes(sut_repo, base_ref="main")
+    coverage = analyze_coverage(sut_repo, changed)
+
+    assert coverage.unit == CoverageStatus.PRESENT
+    assert any(Path(f).name == "unit.py" for f in coverage.found_test_files)
 
 
 def test_e2e_not_required_becomes_missing_once_frontend_changes(sut_repo: Path):
@@ -53,7 +67,7 @@ def test_e2e_not_required_becomes_missing_once_frontend_changes(sut_repo: Path):
 
 
 def test_performance_stays_not_required_without_a_locustfile(sut_repo: Path):
-    perf_dir = sut_repo / "tests" / "performance"
+    perf_dir = sut_repo / "tasks" / "performance"
     perf_dir.mkdir(parents=True)
     (perf_dir / "notes.txt").write_text("no locustfile here\n", encoding="utf-8")
 
@@ -64,9 +78,20 @@ def test_performance_stays_not_required_without_a_locustfile(sut_repo: Path):
 
 
 def test_performance_present_when_matching_locustfile_exists(sut_repo: Path):
-    perf_dir = sut_repo / "tests" / "performance"
+    perf_dir = sut_repo / "tasks" / "performance"
     perf_dir.mkdir(parents=True)
     (perf_dir / "locustfile_tasks.py").write_text("# tasks load test\n", encoding="utf-8")
+
+    changed = analyze_changes(sut_repo, base_ref="main")
+    coverage = analyze_coverage(sut_repo, changed)
+
+    assert coverage.performance == CoverageStatus.PRESENT
+
+
+def test_performance_present_when_monolithic_performance_file_exists(sut_repo: Path):
+    perf_dir = sut_repo / "tasks" / "performance"
+    perf_dir.mkdir(parents=True)
+    (perf_dir / "performance.py").write_text("# load test\n", encoding="utf-8")
 
     changed = analyze_changes(sut_repo, base_ref="main")
     coverage = analyze_coverage(sut_repo, changed)

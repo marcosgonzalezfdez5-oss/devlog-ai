@@ -29,10 +29,10 @@ def _summarize(label: str, executed: bool, passed: int = 0, failed: int = 0, ski
 
 @tool
 def run_unit_tests(run_id: str) -> str:
-    """Run unit tests (backend/tests/unit) via pytest and record the result."""
+    """Run unit tests (tasks/unit) via pytest and record the result."""
     sut_repo_path = get_settings().sut_repo_path
     run_dir = get_run_dir(run_id)
-    result = run_pytest_suite(TestCategory.UNIT, sut_repo_path / "backend" / "tests" / "unit", run_dir)
+    result = run_pytest_suite(TestCategory.UNIT, sut_repo_path / "tasks" / "unit", run_dir)
 
     results = _load_test_results(run_id)
     results.unit = result
@@ -43,11 +43,11 @@ def run_unit_tests(run_id: str) -> str:
 
 @tool
 def run_integration_tests(run_id: str) -> str:
-    """Run integration tests (backend/tests/integration) via pytest and record the result."""
+    """Run integration tests (tasks/integration) via pytest and record the result."""
     sut_repo_path = get_settings().sut_repo_path
     run_dir = get_run_dir(run_id)
     result = run_pytest_suite(
-        TestCategory.INTEGRATION, sut_repo_path / "backend" / "tests" / "integration", run_dir
+        TestCategory.INTEGRATION, sut_repo_path / "tasks" / "integration", run_dir
     )
 
     results = _load_test_results(run_id)
@@ -59,10 +59,10 @@ def run_integration_tests(run_id: str) -> str:
 
 @tool
 def run_e2e_tests(run_id: str) -> str:
-    """Run end-to-end tests (tests/e2e) via pytest-playwright and record the result."""
+    """Run end-to-end tests (tasks/e2e) via pytest-playwright and record the result."""
     sut_repo_path = get_settings().sut_repo_path
     run_dir = get_run_dir(run_id)
-    result = run_pytest_suite(TestCategory.E2E, sut_repo_path / "tests" / "e2e", run_dir)
+    result = run_pytest_suite(TestCategory.E2E, sut_repo_path / "tasks" / "e2e", run_dir)
 
     results = _load_test_results(run_id)
     results.e2e = result
@@ -73,10 +73,10 @@ def run_e2e_tests(run_id: str) -> str:
 
 @tool
 def run_performance_tests(run_id: str) -> str:
-    """Run performance tests (tests/performance) via Locust and record the result."""
+    """Run performance tests (tasks/performance) via Locust and record the result."""
     sut_repo_path = get_settings().sut_repo_path
     run_dir = get_run_dir(run_id)
-    result = run_locust_suite(sut_repo_path / "tests" / "performance", run_dir)
+    result = run_locust_suite(sut_repo_path / "tasks" / "performance", run_dir)
 
     results = _load_test_results(run_id)
     results.performance = result

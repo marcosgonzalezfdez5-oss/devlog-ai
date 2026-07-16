@@ -18,8 +18,32 @@ from app.models.enums import TestCategory
 from app.models.state import PerformanceResult, TestCaseResult, TestSuiteResult
 
 
-def _has_test_files(test_dir: Path) -> bool:
-    return test_dir.is_dir() and any(test_dir.rglob("test_*.py"))
+def _resolve_python_executable(base_dir: Path) -> str:
+    """Prefer the SUT's own venv interpreter over the agent's.
+
+    task_manager's test dependencies (supabase, fastapi, pytest, locust, ...)
+    are installed in `task_manager/tasks/venv`, not the agent's venv - running
+    pytest/locust with `sys.executable` would fail to import the SUT's code.
+    Falls back to `sys.executable` when no such venv exists (e.g. the
+    synthetic repos built by the agent's own test fixtures).
+    """
+    venv_dir = base_dir / "venv"
+    for candidate in (venv_dir / "Scripts" / "python.exe", venv_dir / "bin" / "python"):
+        if candidate.is_file():
+            return str(candidate)
+    return sys.executable
+
+
+def _collect_test_files(test_dir: Path, category: TestCategory) -> list[Path]:
+    """Find test files, covering both per-feature (`test_*.py`/`*_test.py`) and
+    task_manager's monolithic-per-category (`{category}.py`) conventions."""
+    if not test_dir.is_dir():
+        return []
+    files = sorted(test_dir.rglob("test_*.py")) + sorted(test_dir.rglob("*_test.py"))
+    monolithic_file = test_dir / f"{category.value}.py"
+    if monolithic_file.is_file() and monolithic_file not in files:
+        files.append(monolithic_file)
+    return files
 
 
 def _empty_suite(category: TestCategory, duration_seconds: float = 0.0) -> TestSuiteResult:
@@ -85,17 +109,24 @@ def _parse_junit(category: TestCategory, junit_path: Path, fallback_duration: fl
 def run_pytest_suite(category: TestCategory, test_dir: Path, run_dir: Path) -> TestSuiteResult:
     """Run pytest against `test_dir`, parsing results from a JUnit XML report.
 
+    Test files are passed to pytest explicitly (rather than the bare
+    directory) so collection doesn't depend on filename-based discovery -
+    task_manager's monolithic `{category}.py` files wouldn't otherwise be
+    collected when pytest is given a directory to search.
+
     Returns `executed=False` without invoking pytest if `test_dir` has
-    no `test_*.py` files, avoiding pytest's "no tests collected" exit
+    no matching test files, avoiding pytest's "no tests collected" exit
     code being mistaken for a failure.
     """
-    if not _has_test_files(test_dir):
+    test_files = _collect_test_files(test_dir, category)
+    if not test_files:
         return _empty_suite(category)
 
     junit_path = run_dir / f"{category.value}.xml"
+    python_executable = _resolve_python_executable(test_dir.parent)
     start = time.monotonic()
     subprocess.run(
-        [sys.executable, "-m", "pytest", str(test_dir), f"--junitxml={junit_path}", "-q"],
+        [python_executable, "-m", "pytest", *(str(f) for f in test_files), f"--junitxml={junit_path}", "-q"],
         capture_output=True,
         text=True,
         check=False,
@@ -108,6 +139,9 @@ def run_pytest_suite(category: TestCategory, test_dir: Path, run_dir: Path) -> T
 def _find_locustfile(performance_dir: Path) -> Path | None:
     if not performance_dir.is_dir():
         return None
+    monolithic_file = performance_dir / "performance.py"
+    if monolithic_file.is_file():
+        return monolithic_file
     return next(iter(sorted(performance_dir.rglob("locustfile*.py"))), None)
 
 
@@ -153,9 +187,10 @@ def run_locust_suite(
         return PerformanceResult(executed=False)
 
     csv_prefix = run_dir / "performance"
+    python_executable = _resolve_python_executable(performance_dir.parent)
     subprocess.run(
         [
-            sys.executable,
+            python_executable,
             "-m",
             "locust",
             "-f",

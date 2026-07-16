@@ -1,28 +1,28 @@
 """Application configuration loaded from environment variables."""
 
 from functools import lru_cache
+import os
 from pathlib import Path
 from typing import Literal
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 LLMProvider = Literal["anthropic", "openai", "gemini"]
 
 _AGENT_ROOT = Path(__file__).resolve().parent.parent
 
-
 class Settings(BaseSettings):
     """Environment-backed settings for the AI QA Deep Agent."""
 
-    llm_provider: LLMProvider = "anthropic"
+    llm_provider: LLMProvider = os.getenv("LLM_PROVIDER")
 
-    anthropic_model: str = "claude-sonnet-5"
-    openai_model: str = "gpt-4o"
-    gemini_model: str = "gemini-1.5-flash"
+    anthropic_model: str = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
+    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o")
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-1.5")
 
-    anthropic_api_key: str | None = None
-    openai_api_key: str | None = None
-    google_api_key: str | None = None
+    anthropic_api_key: str | None = os.getenv("ANTHROPIC_API_KEY")
+    openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
+    google_api_key: str | None = os.getenv("GOOGLE_API_KEY")
 
     sut_repo_path: Path = _AGENT_ROOT.parent / "task_manager"
     reports_dir: Path = _AGENT_ROOT / "docs" / "reports"

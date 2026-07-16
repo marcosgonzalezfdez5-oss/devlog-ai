@@ -1,14 +1,18 @@
 """Deterministic test-coverage detection for the Coverage Analysis Tool.
 
 This never generates tests - it only reports whether tests already
-exist for the changed files. task_manager has no test suite yet, so
-the directory convention below is *prescribed* here rather than
-inferred from existing structure:
+exist for the changed files. task_manager's test suite lives at:
 
-- unit:        backend/tests/unit/
-- integration: backend/tests/integration/
-- e2e:         tests/e2e/          (pytest-playwright)
-- performance: tests/performance/  (Locust)
+- unit:        tasks/unit/         (monolithic unit.py)
+- integration: tasks/integration/  (monolithic integration.py)
+- e2e:         tasks/e2e/          (monolithic e2e.py, pytest-playwright)
+- performance: tasks/performance/  (monolithic performance.py, Locust)
+
+Each category is a single file covering every feature rather than one
+file per feature, so presence of that file is treated as coverage for
+the whole category - the per-feature keyword match below only applies
+as a fallback for directories that instead hold multiple `test_*.py`/
+`*_test.py` files.
 """
 
 import re
@@ -67,7 +71,11 @@ def _matches_keywords(test_file: Path, keywords: set[str]) -> bool:
     return bool(name_tokens & keywords)
 
 
-def _status_for_dir(test_dir: Path, keywords: set[str]) -> tuple[CoverageStatus, list[Path]]:
+def _status_for_dir(test_dir: Path, keywords: set[str], category_name: str) -> tuple[CoverageStatus, list[Path]]:
+    monolithic_file = test_dir / f"{category_name}.py"
+    if monolithic_file.is_file():
+        return CoverageStatus.PRESENT, [monolithic_file]
+
     test_files = _find_test_files(test_dir)
     if not test_files:
         return CoverageStatus.MISSING, []
@@ -85,28 +93,33 @@ def analyze_coverage(repo_path: Path, changed_files: ChangedFiles) -> CoverageRe
 
     found: list[Path] = []
 
-    unit_status, unit_files = _status_for_dir(repo_path / "backend" / "tests" / "unit", keywords)
+    unit_status, unit_files = _status_for_dir(repo_path / "tasks" / "unit", keywords, "unit")
     found.extend(unit_files)
 
     integration_status, integration_files = _status_for_dir(
-        repo_path / "backend" / "tests" / "integration", keywords
+        repo_path / "tasks" / "integration", keywords, "integration"
     )
     found.extend(integration_files)
 
     if frontend_changed:
-        e2e_status, e2e_files = _status_for_dir(repo_path / "tests" / "e2e", keywords)
+        e2e_status, e2e_files = _status_for_dir(repo_path / "tasks" / "e2e", keywords, "e2e")
         found.extend(e2e_files)
     else:
         e2e_status = CoverageStatus.NOT_REQUIRED
 
-    perf_dir = repo_path / "tests" / "performance"
-    locustfiles = _find_locustfiles(perf_dir)
-    if not locustfiles:
-        performance_status = CoverageStatus.NOT_REQUIRED
+    perf_dir = repo_path / "tasks" / "performance"
+    monolithic_perf_file = perf_dir / "performance.py"
+    if monolithic_perf_file.is_file():
+        found.append(monolithic_perf_file)
+        performance_status = CoverageStatus.PRESENT
     else:
-        matching_locustfiles = [f for f in locustfiles if _matches_keywords(f, keywords)]
-        found.extend(matching_locustfiles)
-        performance_status = CoverageStatus.PRESENT if matching_locustfiles else CoverageStatus.MISSING
+        locustfiles = _find_locustfiles(perf_dir)
+        if not locustfiles:
+            performance_status = CoverageStatus.NOT_REQUIRED
+        else:
+            matching_locustfiles = [f for f in locustfiles if _matches_keywords(f, keywords)]
+            found.extend(matching_locustfiles)
+            performance_status = CoverageStatus.PRESENT if matching_locustfiles else CoverageStatus.MISSING
 
     return CoverageReport(
         unit=unit_status,

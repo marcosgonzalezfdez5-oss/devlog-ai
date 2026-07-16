@@ -21,7 +21,7 @@ def _run_chain_up_to_decision(run_id: str) -> str:
 
 
 def test_pipeline_blocks_when_integration_coverage_is_missing(configured_settings: Settings):
-    unit_dir = configured_settings.sut_repo_path / "backend" / "tests" / "unit"
+    unit_dir = configured_settings.sut_repo_path / "tasks" / "unit"
     unit_dir.mkdir(parents=True)
     (unit_dir / "test_tasks.py").write_text("def test_tasks(): assert True\n", encoding="utf-8")
 
@@ -43,11 +43,11 @@ def test_pipeline_blocks_when_integration_coverage_is_missing(configured_setting
 
 
 def test_pipeline_reaches_ready_once_integration_coverage_exists(configured_settings: Settings):
-    unit_dir = configured_settings.sut_repo_path / "backend" / "tests" / "unit"
+    unit_dir = configured_settings.sut_repo_path / "tasks" / "unit"
     unit_dir.mkdir(parents=True)
     (unit_dir / "test_tasks.py").write_text("def test_tasks(): assert True\n", encoding="utf-8")
 
-    integration_dir = configured_settings.sut_repo_path / "backend" / "tests" / "integration"
+    integration_dir = configured_settings.sut_repo_path / "tasks" / "integration"
     integration_dir.mkdir(parents=True)
     (integration_dir / "test_tasks.py").write_text("def test_tasks_integration(): assert True\n", encoding="utf-8")
 
